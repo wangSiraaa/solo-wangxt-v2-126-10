@@ -420,6 +420,72 @@ body,
   color: var(--red);
 }
 
+/* ---- 讲义编排 ---- */
+
+.anno-check-list {
+  max-height: 130px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 6px;
+  margin-top: 3px;
+  background: #0a1020;
+}
+
+.anno-check-list .check {
+  margin: 3px 0;
+  font-size: 12px;
+}
+
+.anno-check-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handout-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.handout-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #0a1020;
+}
+
+.handout-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.handout-item-meta {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 2px 0 6px;
+}
+
+.handout-missing {
+  color: var(--red);
+  font-size: 11px;
+  margin: 2px 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.prune-btn {
+  flex: none;
+  color: #ffb27a;
+  text-decoration: underline;
+  font-size: 11px;
+}
+
 .app-footer {
   padding: 8px 18px;
   font-size: 11px;

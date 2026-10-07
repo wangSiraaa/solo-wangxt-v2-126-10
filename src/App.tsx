@@ -7,6 +7,7 @@ import GlobeView from './components/GlobeView';
 import ProjectionView from './components/ProjectionView';
 import Controls from './components/Controls';
 import InfoPanel from './components/InfoPanel';
+import HandoutPanel from './components/HandoutPanel';
 import { SkyEpoch } from './lib/astronomy';
 import { computeSky, isTargetVisible, type SkyModel } from './lib/computeSky';
 import { fovBoundary } from './lib/geoMath';
@@ -17,10 +18,21 @@ import {
   downloadText,
   type ExportMeta
 } from './lib/exporter';
-import { deleteAnnotation, deleteFov, getAllAnnotations, getAllFovs, putAnnotation, putFov } from './lib/db';
+import { buildHandoutHtml, openPrintWindow } from './lib/handout';
+import {
+  deleteAnnotation,
+  deleteFov,
+  deleteHandout,
+  getAllAnnotations,
+  getAllFovs,
+  getAllHandouts,
+  putAnnotation,
+  putFov,
+  putHandout
+} from './lib/db';
 import { DEMO_SCENARIOS } from './data/scenarios';
 import { OBSERVING_SITES } from './data/sites';
-import type { Annotation, FovConfig, SavedFov, SiteState } from './types';
+import type { Annotation, FovConfig, HandoutLayout, SavedFov, SiteState } from './types';
 
 const DEFAULT_SITE: SiteState = OBSERVING_SITES[0];
 const DEFAULT_TIME = '2026-09-30T13:00:00Z';
@@ -43,11 +55,13 @@ export default function App() {
   const [focusToken, setFocusToken] = useState<{ id: string; nonce: number } | null>(null);
   const [savedFovs, setSavedFovs] = useState<SavedFov[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [handouts, setHandouts] = useState<HandoutLayout[]>([]);
 
   // 初始载入 IndexedDB
   useEffect(() => {
     getAllFovs().then(setSavedFovs).catch(() => undefined);
     getAllAnnotations().then(setAnnotations).catch(() => undefined);
+    getAllHandouts().then(setHandouts).catch(() => undefined);
   }, []);
 
   // 历元（位置+时间）；SkyEpoch 内部调用 astronomy-engine 建旋转矩阵
@@ -117,6 +131,55 @@ export default function App() {
     putAnnotation(a).then(() => getAllAnnotations().then(setAnnotations));
   };
   const removeAnnotation = (id: string) => deleteAnnotation(id).then(() => getAllAnnotations().then(setAnnotations));
+
+  // 讲义版式存取
+  const saveHandout = (layout: HandoutLayout) => putHandout(layout).then(() => getAllHandouts().then(setHandouts));
+  const removeHandout = (id: string) => deleteHandout(id).then(() => getAllHandouts().then(setHandouts));
+
+  /**
+   * 生成讲义：用当前台站/UTC 与版式引用的视场几何现场重算天区，
+   * 再合成打印页 / 导出 HTML。不读缓存快照，不请求任何网络资源。
+   */
+  const generateHandout = (layout: HandoutLayout, mode: 'print' | 'html') => {
+    if (!epoch) {
+      alert('当前时间无效，无法重算天区，请先修正 UTC 时间输入。');
+      return;
+    }
+    const fovRec = savedFovs.find((f) => f.uuid === layout.fovUuid);
+    if (!fovRec) {
+      alert('该版式引用的视场已被删除。请在讲义面板中重新选择视场（或移除缺失引用后再选择）。');
+      return;
+    }
+    const hFov = fovRec.fov;
+    const boundary = fovBoundary(hFov.centerRa, hFov.centerDec, hFov.radiusDeg, 128);
+    const hSky = computeSky(epoch, hFov, magLimit, horizonClip, boundary);
+    const target = hSky.targets.find((t) => t.id === layout.targetId);
+    if (!target) {
+      alert('该版式引用的目标不在当前星表/天体列表中，请重新选择目标。');
+      return;
+    }
+    // 只解析当前仍存在的批注；缺失数量如实传给讲义，不凭空复原
+    const resolved = layout.annotationUuids
+      .map((id) => annotations.find((a) => a.uuid === id))
+      .filter((a): a is Annotation => !!a);
+    const html = buildHandoutHtml({
+      layout,
+      fov: hFov,
+      sky: hSky,
+      target,
+      annotations: resolved,
+      missingAnnotations: layout.annotationUuids.length - resolved.length,
+      site,
+      timeUtcIso: timeIso,
+      magLimit,
+      horizonClip
+    });
+    if (mode === 'print') {
+      openPrintWindow(html);
+    } else {
+      downloadText(`讲义_${layout.name}_${timeIso.slice(0, 10)}.html`, html, 'text/html;charset=utf-8');
+    }
+  };
 
   // 导出
   const exportMeta = (label: string): ExportMeta | null => {
@@ -198,6 +261,15 @@ export default function App() {
             onDeleteFov={removeFov}
             onAddAnnotation={addAnnotation}
             onDeleteAnnotation={removeAnnotation}
+          />
+          <HandoutPanel
+            layouts={handouts}
+            savedFovs={savedFovs}
+            annotations={annotations}
+            targets={sky ? sky.targets : null}
+            onSave={saveHandout}
+            onDelete={removeHandout}
+            onGenerate={generateHandout}
           />
         </aside>
 

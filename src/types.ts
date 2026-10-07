@@ -37,3 +37,24 @@ export interface Annotation {
   text: string;
   color: string;
 }
+
+/**
+ * 讲义版式：只保存"选择"（引用），不复制任何内容。
+ * 视场/批注被删除后，版式中对应引用即失效，界面如实提示缺失，
+ * 由用户决定是否移除失效引用——不会从版式里"复原"内容。
+ * 生成讲义时所有坐标均按当前台站/UTC 现场重算。
+ */
+export interface HandoutLayout {
+  uuid: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  /** 引用的已保存视场 uuid */
+  fovUuid: string;
+  /** 目标 id（星表恒星或太阳系天体，如 'arcturus' / 'body-Mars'） */
+  targetId: string;
+  /** 引用的批注 uuid 列表（仅存引用，不存文字副本） */
+  annotationUuids: string[];
+  /** 讲义星图使用的投影 */
+  projection: 'stereographic' | 'equidistant';
+}

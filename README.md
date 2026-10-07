@@ -31,6 +31,7 @@ npm run preview    # 本地预览构建产物
 | 极区 / 跨零 / 近地平星表样例 | "演示场景"三个一键预设；`data/catalog.ts` 星表带 `polar` / `zero-cross` / `bright` 标签 |
 | 两视图点击定位同一目标 | 任一视图点击 → 全局选中；三维视图飞行转向，两张投影图同步金色高亮 |
 | 导出注明坐标系与时间基准 | SVG / PNG / JSON 三种导出；图注写明 J2000.0 平赤道坐标系、UTC 时间、JD(TT)、GMST、台站经纬度、星等与裁切设置、投影变形说明 |
+| 讲义编排（离线打印页） | `HandoutPanel.tsx` + `lib/handout.ts`：选择已保存视场、一个目标与若干现有批注组成版式（存 IndexedDB `handouts` 库）；生成一页可打印 HTML，含白底星图、目标 J2000 坐标、台站/UTC、投影名称及变形说明；版式只存引用不复制内容，原批注删除后如实提示缺失并可移除；地平以下目标只标"不可见" |
 
 ## 内置演示场景
 
@@ -54,8 +55,9 @@ src/
   lib/computeSky.ts    合并目标、逐条转换、三条独立筛选
   lib/projections.ts   D3 两种投影构建、球面裁剪与比例尺标定
   lib/exporter.ts      独立 SVG / PNG / JSON 导出（含完整图注）
-  lib/db.ts            IndexedDB Promise 封装
-  components/          GlobeView / ProjectionView / Controls / InfoPanel
+  lib/handout.ts       讲义页生成（离线可打印 HTML，投影名称与变形说明逐次写入）
+  lib/db.ts            IndexedDB Promise 封装（fovs / annotations / handouts 三库）
+  components/          GlobeView / ProjectionView / Controls / InfoPanel / HandoutPanel
 ```
 
 ## 图例
