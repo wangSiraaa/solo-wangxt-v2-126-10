@@ -1,10 +1,21 @@
 // 控制面板：观测位置/时间、视场中心与角半径、星等与地平线独立筛选、
-// 演示场景、视场与批注的 IndexedDB 存取。
+// 演示场景、视场与批注的 IndexedDB 存取，以及离线讲义编排。
 
 import { useState } from 'react';
 import { OBSERVING_SITES } from '../data/sites';
 import { DEMO_SCENARIOS } from '../data/scenarios';
-import type { FovConfig, SavedFov, Annotation, SiteState } from '../types';
+import type { SkyTarget } from '../lib/computeSky';
+import type { HandoutData } from '../lib/handout';
+import type { FovConfig, HandoutLayout, SavedFov, Annotation, SiteState } from '../types';
+
+/** 讲义编排草稿（= 未保存的版式内容） */
+export interface HandoutDraft {
+  name: string;
+  fovUuid: string | null;
+  targetId: string | null;
+  annotationUuids: string[];
+  projection: 'stereographic' | 'equidistant';
+}
 
 interface ControlsProps {
   site: SiteState;
@@ -16,6 +27,12 @@ interface ControlsProps {
   showGraticule: boolean;
   savedFovs: SavedFov[];
   annotations: Annotation[];
+  handoutDraft: HandoutDraft;
+  savedHandouts: HandoutLayout[];
+  /** 当前视图中进入视场并通过星等筛选的目标（含地平以下，供选择并标注不可见） */
+  handoutTargets: SkyTarget[];
+  /** 草稿按当前视图实时解析的结果；sky 无效时为 null */
+  handoutResolved: HandoutData | null;
   onChangeSite: (site: SiteState) => void;
   onChangeTime: (iso: string) => void;
   onChangeFov: (fov: FovConfig) => void;
@@ -29,6 +46,11 @@ interface ControlsProps {
   onDeleteFov: (uuid: string) => void;
   onAddAnnotation: (text: string, color: string) => void;
   onDeleteAnnotation: (uuid: string) => void;
+  onChangeHandoutDraft: (patch: Partial<HandoutDraft>) => void;
+  onSaveHandout: () => void;
+  onLoadHandout: (h: HandoutLayout) => void;
+  onDeleteHandout: (uuid: string) => void;
+  onOpenHandout: () => void;
 }
 
 export default function Controls(p: ControlsProps) {
@@ -176,6 +198,160 @@ export default function Controls(p: ControlsProps) {
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="ctl-block handout-block">
+        <h3>离线讲义编排（打印 / 导出）</h3>
+        <p className="hint">版式只把选择保存在本地（引用 + 投影）；星图与坐标一律按<b>当前可重算视图</b>生成，不缓存快照、不拉取网络图层。</p>
+
+        <label>
+          引用已保存视场
+          <select value={p.handoutDraft.fovUuid ?? ''} onChange={(e) => p.onChangeHandoutDraft({ fovUuid: e.target.value || null })}>
+            <option value="">不引用（使用当前视场）</option>
+            {p.savedFovs.map((f) => (
+              <option key={f.uuid} value={f.uuid}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {p.handoutDraft.fovUuid &&
+          (() => {
+            const ref = p.savedFovs.find((f) => f.uuid === p.handoutDraft.fovUuid);
+            if (!ref)
+              return (
+                <p className="hint handout-missing">
+                  原视场已删除（未复原内容）。
+                  <button className="link-btn-inline" onClick={() => p.onChangeHandoutDraft({ fovUuid: null })}>
+                    移除引用
+                  </button>
+                </p>
+              );
+            return (
+              <p className="hint">
+                <button className="link-btn-inline" onClick={() => p.onLoadFov(ref)}>
+                  载入该视场
+                </button>
+                后再生成，星图即与引用一致；否则星图按当前视图绘制。
+              </p>
+            );
+          })()}
+
+        <label>
+          主目标（取自当前视场，含地平以下）
+          <select value={p.handoutDraft.targetId ?? ''} onChange={(e) => p.onChangeHandoutDraft({ targetId: e.target.value || null })}>
+            <option value="">不指定主目标</option>
+            {p.handoutTargets.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+                {!t.aboveHorizon ? '（地平以下·不可见）' : ''}
+                {t.kind === 'star' ? ` · ${t.mag.toFixed(1)}等` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        {p.handoutDraft.targetId && !p.handoutTargets.some((t) => t.id === p.handoutDraft.targetId) && (
+          <p className="hint handout-missing">
+            目标不在当前视图（视场/星等/地平筛选外），讲义不复原其坐标。
+            <button className="link-btn-inline" onClick={() => p.onChangeHandoutDraft({ targetId: null })}>
+              移除引用
+            </button>
+          </p>
+        )}
+
+        <div className="handout-anno-head">选用现有批注：</div>
+        {p.annotations.length === 0 ? (
+          <p className="hint">还没有批注。</p>
+        ) : (
+          <ul className="handout-anno-list">
+            {p.annotations.map((a) => {
+              const checked = p.handoutDraft.annotationUuids.includes(a.uuid);
+              return (
+                <li key={a.uuid}>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) =>
+                        p.onChangeHandoutDraft({
+                          annotationUuids: e.target.checked
+                            ? [...p.handoutDraft.annotationUuids, a.uuid]
+                            : p.handoutDraft.annotationUuids.filter((x) => x !== a.uuid)
+                        })
+                      }
+                    />
+                    <span className="dot" style={{ background: a.color }} />
+                    <span className="handout-anno-text">{a.text}</span>
+                  </label>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {(() => {
+          const gone = p.handoutDraft.annotationUuids.filter((u) => !p.annotations.some((a) => a.uuid === u));
+          if (gone.length === 0) return null;
+          return (
+            <p className="hint handout-missing">
+              {gone.length} 条原批注已删除，未凭空复原。
+              <button
+                className="link-btn-inline"
+                onClick={() =>
+                  p.onChangeHandoutDraft({
+                    annotationUuids: p.handoutDraft.annotationUuids.filter((u) => !gone.includes(u))
+                  })
+                }
+              >
+                从版式移除
+              </button>
+            </p>
+          );
+        })()}
+
+        <label className="check">
+          <input
+            type="radio"
+            name="handout-proj"
+            checked={p.handoutDraft.projection === 'stereographic'}
+            onChange={() => p.onChangeHandoutDraft({ projection: 'stereographic' })}
+          />
+          立体投影 Stereographic
+        </label>
+        <label className="check">
+          <input
+            type="radio"
+            name="handout-proj"
+            checked={p.handoutDraft.projection === 'equidistant'}
+            onChange={() => p.onChangeHandoutDraft({ projection: 'equidistant' })}
+          />
+          等距方位投影 Azimuthal Equidistant
+        </label>
+
+        <div className="save-row">
+          <input placeholder="版式名称（如：科普活动讲义A）" value={p.handoutDraft.name} onChange={(e) => p.onChangeHandoutDraft({ name: e.target.value })} />
+          <button className="btn" disabled={!p.handoutDraft.name.trim()} onClick={p.onSaveHandout}>
+            存版式
+          </button>
+        </div>
+
+        {p.savedHandouts.length > 0 && (
+          <ul className="store-list">
+            {p.savedHandouts.map((h) => (
+              <li key={h.uuid}>
+                <button className="link-btn" onClick={() => p.onLoadHandout(h)} title={`${h.annotationUuids.length} 条批注 · ${h.projection}`}>
+                  {h.name}
+                  <span className="handout-layout-tag">{h.projection === 'stereographic' ? '立体' : '等距'}</span>
+                </button>
+                <button className="x-btn" onClick={() => p.onDeleteHandout(h.uuid)}>×</button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <button className="btn handout-generate" onClick={p.onOpenHandout}>
+          生成可打印讲义（当前视图）
+        </button>
+        {p.handoutResolved?.hasMissingRefs && <p className="hint handout-missing">当前版式存在引用缺失，讲义页会如实列出且不复原内容。</p>}
       </section>
     </div>
   );

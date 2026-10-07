@@ -31,6 +31,20 @@ npm run preview    # 本地预览构建产物
 | 极区 / 跨零 / 近地平星表样例 | "演示场景"三个一键预设；`data/catalog.ts` 星表带 `polar` / `zero-cross` / `bright` 标签 |
 | 两视图点击定位同一目标 | 任一视图点击 → 全局选中；三维视图飞行转向，两张投影图同步金色高亮 |
 | 导出注明坐标系与时间基准 | SVG / PNG / JSON 三种导出；图注写明 J2000.0 平赤道坐标系、UTC 时间、JD(TT)、GMST、台站经纬度、星等与裁切设置、投影变形说明 |
+| 一页离线可打印讲义 | `lib/handout.ts` + `components/HandoutModal.tsx`：选已保存视场＋一个目标＋若干现有批注，按**当前可重算视图**生成 A4 单页（星图、目标 J2000 坐标、台站/UTC、投影名称及变形说明）；版式只存"引用＋投影"于 IndexedDB，打印与 SVG/PNG 导出共用同一份离线 SVG，无网络图层 |
+
+### 讲义的数据纪律
+
+- 版式（`HandoutLayout`）只在本地保存**引用**（视场 uuid / 目标 id / 批注 uuid 列表）与**投影选择**，
+  不缓存任何坐标、星点或图层快照；每次生成都由当前 `SkyModel` 实时重算。
+- **投影一致**：讲义星图与屏幕视图、SVG 导出共用同一套投影构建与标定，切换投影后重新生成，
+  页内标题、星图注脚、变形说明三处投影名称随之改变。
+- **缺失不复活**：被引用的视场/批注删除后，讲义在编排区与页面⑤区如实列出"已删除/无法解析"，
+  并提供"移除引用"入口；绝不复原旧文字或旧位置。引用视场参数与当前视图不一致时也会提示
+  "星图按当前可重算视图绘制"。
+- **地平纪律**：主目标在地平以下时，信息区明确标注"地平以下 · 不可见"（含高度/方位），
+  星图中用红色虚线环、半透明符号与"（地平下）"标记，绝不标为可见；开启地平线裁切时星图不绘出，
+  但不可见结论仍然保留。
 
 ## 内置演示场景
 
@@ -54,8 +68,10 @@ src/
   lib/computeSky.ts    合并目标、逐条转换、三条独立筛选
   lib/projections.ts   D3 两种投影构建、球面裁剪与比例尺标定
   lib/exporter.ts      独立 SVG / PNG / JSON 导出（含完整图注）
-  lib/db.ts            IndexedDB Promise 封装
-  components/          GlobeView / ProjectionView / Controls / InfoPanel
+  lib/handout.ts       讲义版式解析（缺失不复活）＋ A4 单页 SVG（星图/J2000 坐标/台站UTC/投影变形）
+  lib/db.ts            IndexedDB Promise 封装（fovs / annotations / handouts）
+  components/          GlobeView / ProjectionView / Controls / InfoPanel / HandoutModal
+scripts/test-handout.ts 讲义三条验收的 Node 逻辑测试（esbuild 打包后运行）
 ```
 
 ## 图例

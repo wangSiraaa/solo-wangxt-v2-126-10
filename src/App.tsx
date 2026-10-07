@@ -5,8 +5,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import GlobeView from './components/GlobeView';
 import ProjectionView from './components/ProjectionView';
-import Controls from './components/Controls';
+import Controls, { type HandoutDraft } from './components/Controls';
 import InfoPanel from './components/InfoPanel';
+import HandoutModal from './components/HandoutModal';
 import { SkyEpoch } from './lib/astronomy';
 import { computeSky, isTargetVisible, type SkyModel } from './lib/computeSky';
 import { fovBoundary } from './lib/geoMath';
@@ -17,10 +18,21 @@ import {
   downloadText,
   type ExportMeta
 } from './lib/exporter';
-import { deleteAnnotation, deleteFov, getAllAnnotations, getAllFovs, putAnnotation, putFov } from './lib/db';
+import { resolveHandout, type HandoutData, type HandoutMeta } from './lib/handout';
+import {
+  deleteAnnotation,
+  deleteFov,
+  deleteHandout,
+  getAllAnnotations,
+  getAllFovs,
+  getAllHandouts,
+  putAnnotation,
+  putFov,
+  putHandout
+} from './lib/db';
 import { DEMO_SCENARIOS } from './data/scenarios';
 import { OBSERVING_SITES } from './data/sites';
-import type { Annotation, FovConfig, SavedFov, SiteState } from './types';
+import type { Annotation, FovConfig, HandoutLayout, SavedFov, SiteState } from './types';
 
 const DEFAULT_SITE: SiteState = OBSERVING_SITES[0];
 const DEFAULT_TIME = '2026-09-30T13:00:00Z';
@@ -43,11 +55,21 @@ export default function App() {
   const [focusToken, setFocusToken] = useState<{ id: string; nonce: number } | null>(null);
   const [savedFovs, setSavedFovs] = useState<SavedFov[]>([]);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [savedHandouts, setSavedHandouts] = useState<HandoutLayout[]>([]);
+  const [handoutOpen, setHandoutOpen] = useState(false);
+  const [handoutDraft, setHandoutDraft] = useState<HandoutDraft>({
+    name: '',
+    fovUuid: null,
+    targetId: null,
+    annotationUuids: [],
+    projection: 'stereographic'
+  });
 
   // 初始载入 IndexedDB
   useEffect(() => {
     getAllFovs().then(setSavedFovs).catch(() => undefined);
     getAllAnnotations().then(setAnnotations).catch(() => undefined);
+    getAllHandouts().then(setSavedHandouts).catch(() => undefined);
   }, []);
 
   // 历元（位置+时间）；SkyEpoch 内部调用 astronomy-engine 建旋转矩阵
@@ -156,6 +178,75 @@ export default function App() {
     downloadText(`星表视场_${timeIso.slice(0, 10)}.json`, buildExportJson(sky, visible, annotations, meta), 'application/json');
   };
 
+  // —— 离线讲义 ——
+  // 讲义元信息与星图数字全部取自当前状态（site/time/sky），随视图变化即时重算。
+  const handoutMeta: HandoutMeta | null = useMemo(() => {
+    if (!sky) return null;
+    return {
+      site,
+      timeUtcIso: timeIso,
+      julianDay: sky.julianDay,
+      gmstHours: sky.gmstHours,
+      magLimit,
+      horizonClip
+    };
+  }, [sky, site, timeIso, magLimit, horizonClip]);
+
+  // 可选主目标：在当前视场圆内、通过星等筛选；地平以下保留但明确不可见
+  const handoutTargets = useMemo(() => {
+    if (!sky) return [];
+    return sky.targets.filter((t) => t.inFov && t.passesMag);
+  }, [sky]);
+
+  // 草稿版式（uuid 在保存时才生成；未保存时用临时 id 解析）
+  const draftLayout: HandoutLayout = useMemo(
+    () => ({
+      uuid: 'draft',
+      name: handoutDraft.name || '未命名版式',
+      createdAt: 0,
+      fovUuid: handoutDraft.fovUuid,
+      targetId: handoutDraft.targetId,
+      annotationUuids: handoutDraft.annotationUuids,
+      projection: handoutDraft.projection
+    }),
+    [handoutDraft]
+  );
+
+  const handoutResolved: HandoutData | null = useMemo(() => {
+    if (!sky || !handoutMeta) return null;
+    return resolveHandout(draftLayout, { sky, fov, meta: handoutMeta, savedFovs, annotations });
+  }, [draftLayout, sky, fov, handoutMeta, savedFovs, annotations]);
+
+  const patchHandoutDraft = (patch: Partial<HandoutDraft>) => setHandoutDraft((d) => ({ ...d, ...patch }));
+
+  const saveHandout = () => {
+    if (!handoutDraft.name.trim()) return;
+    const rec: HandoutLayout = {
+      uuid: uuid(),
+      name: handoutDraft.name.trim(),
+      createdAt: Date.now(),
+      fovUuid: handoutDraft.fovUuid,
+      targetId: handoutDraft.targetId,
+      annotationUuids: [...handoutDraft.annotationUuids],
+      projection: handoutDraft.projection
+    };
+    putHandout(rec).then(() => getAllHandouts().then(setSavedHandouts));
+  };
+  // 载入已存版式：只恢复"选择"；星图仍按当前视图生成，
+  // 若引用视场存在则一并载入其视场参数，方便得到一致画面。
+  const loadHandout = (h: HandoutLayout) => {
+    setHandoutDraft({
+      name: h.name,
+      fovUuid: h.fovUuid,
+      targetId: h.targetId,
+      annotationUuids: [...h.annotationUuids],
+      projection: h.projection
+    });
+    const ref = h.fovUuid ? savedFovs.find((f) => f.uuid === h.fovUuid) : null;
+    if (ref) setFov({ ...ref.fov });
+  };
+  const removeHandout = (id: string) => deleteHandout(id).then(() => getAllHandouts().then(setSavedHandouts));
+
   return (
     <div className="app">
       <header className="app-header">
@@ -198,6 +289,15 @@ export default function App() {
             onDeleteFov={removeFov}
             onAddAnnotation={addAnnotation}
             onDeleteAnnotation={removeAnnotation}
+            handoutDraft={handoutDraft}
+            savedHandouts={savedHandouts}
+            handoutTargets={handoutTargets}
+            handoutResolved={handoutResolved}
+            onChangeHandoutDraft={patchHandoutDraft}
+            onSaveHandout={saveHandout}
+            onLoadHandout={loadHandout}
+            onDeleteHandout={removeHandout}
+            onOpenHandout={() => setHandoutOpen(true)}
           />
         </aside>
 
@@ -266,6 +366,10 @@ export default function App() {
         纯前端本地应用，无后端、无网络请求 · 星表 J2000.0 近似坐标 · 地平坐标转换 astronomy-engine（Rotation_EQJ_HOR，无大气折射）·
         角距一律按球面 haversine 计算，图上像素距离不代表实际角距
       </footer>
+
+      {handoutOpen && handoutResolved && (
+        <HandoutModal data={handoutResolved} onClose={() => setHandoutOpen(false)} />
+      )}
     </div>
   );
 }

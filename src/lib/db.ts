@@ -1,12 +1,13 @@
 // IndexedDB 本地持久化：保存视场配置与天球坐标锚定的批注。
 // 无后端；所有数据仅存于浏览器。Promise 风格的极简封装。
 
-import type { Annotation, SavedFov } from '../types';
+import type { Annotation, HandoutLayout, SavedFov } from '../types';
 
 const DB_NAME = 'local-starchart';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_FOVS = 'fovs';
 const STORE_ANNOTATIONS = 'annotations';
+const STORE_HANDOUTS = 'handouts';
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -21,6 +22,10 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STORE_ANNOTATIONS)) {
         db.createObjectStore(STORE_ANNOTATIONS, { keyPath: 'uuid' });
+      }
+      // v2：讲义版式库（只存引用与投影选择，不存数据快照）
+      if (!db.objectStoreNames.contains(STORE_HANDOUTS)) {
+        db.createObjectStore(STORE_HANDOUTS, { keyPath: 'uuid' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -65,4 +70,17 @@ export async function getAllAnnotations(): Promise<Annotation[]> {
 
 export async function deleteAnnotation(uuid: string): Promise<void> {
   await tx(STORE_ANNOTATIONS, 'readwrite', (s) => s.delete(uuid));
+}
+
+export async function putHandout(h: HandoutLayout): Promise<void> {
+  await tx(STORE_HANDOUTS, 'readwrite', (s) => s.put(h));
+}
+
+export async function getAllHandouts(): Promise<HandoutLayout[]> {
+  const all = await tx<HandoutLayout[]>(STORE_HANDOUTS, 'readonly', (s) => s.getAll());
+  return all.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export async function deleteHandout(uuid: string): Promise<void> {
+  await tx(STORE_HANDOUTS, 'readwrite', (s) => s.delete(uuid));
 }
